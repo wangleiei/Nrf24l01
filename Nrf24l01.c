@@ -1,3 +1,8 @@
+#ifdef __cplusplus
+
+extern "C" {
+
+#endif
 #include "Nrf24l01.h"
 static uint8_t NRF_Write_Reg(NRF24L01_STR*base, uint8_t reg, uint8_t value);
 static uint8_t NRF_Read_Reg(NRF24L01_STR*base, uint8_t reg);
@@ -53,7 +58,7 @@ static void Clear_RX_FIFO(NRF24L01_STR*base);
 static uint8_t NRF_Write_Reg(NRF24L01_STR*base, uint8_t reg, uint8_t value){
 	uint8_t status;
 	base->nrf24l01csn_l();					      // 选通器件
-	status = base->nrf24l01spirw(NRF_WRITE_REG base,| reg);   
+	status = base->nrf24l01spirw(value| reg);   
 										  // 写寄存器地址
 	base->nrf24l01spirw(value);		      // 写数据
 	base->nrf24l01csn_h();						  // 禁止该器件
@@ -89,7 +94,7 @@ static uint8_t NRF_Write_Buf(NRF24L01_STR*base, uint8_t reg, uint8_t *pBuf, uint
 	uint8_t i;
 	uint8_t status;
 	base->nrf24l01csn_l();				     /* 选通器件 */
-	status = base->nrf24l01spirw(NRF_WRITE_REG base,| reg);	   /* 写寄存器地址 */
+	status = base->nrf24l01spirw(reg);	   /* 写寄存器地址 */
 	for(i=0; i<uchars; i++)
 	{
 		base->nrf24l01spirw(pBuf[i]);		   /* 写数据 */
@@ -132,10 +137,10 @@ uint8_t NRF_TxPacket(NRF24L01_STR*base, uint8_t *tx_buf,uint8_t len)
 {	
 	uint8_t i_u8 = 0;
 	uint8_t Saft_Count_u8 = 0;
-	if(NRF_Get_Mode() == NRF_POWER_DOWN){
+	if(NRF_Get_Mode(base) == NRF_POWER_DOWN){
 		return 1;//掉电模式了
 	}
-	if (len > base->base->trx_pload_width)
+	if (len > base->trx_pload_width)
 	{
 		return 1;
 	}
@@ -163,7 +168,7 @@ uint8_t NRF_TxPacket(NRF24L01_STR*base, uint8_t *tx_buf,uint8_t len)
 /*NRF接受函数*/
 uint8_t NRF_Receive_Data(NRF24L01_STR*base, uint8_t *ptr,uint8_t len){
 	uint8_t i_u8 = 0;
-	if(NRF_Get_Mode() == NRF_POWER_DOWN){
+	if(NRF_Get_Mode(base) == NRF_POWER_DOWN){
 		return 1;//掉电模式了
 	}
 	if(len<base->trx_pload_width){return 1;}
@@ -180,15 +185,6 @@ uint8_t NRF_Receive_Data(NRF24L01_STR*base, uint8_t *ptr,uint8_t len){
 		return 0;	
 	}
 }
-//*************************************************************************************************
-// 功能描述 : 检查能不能读写寄存器
-// 输入参数 : Keine
-// 返回参数 : 初始化结果 
-// 说    明 : 
-// 修改时间 : 
-// 修改内容 : 
-//*************************************************************************************************
-uint8_t NRF_Test(NRF24L01_STR*base){}
  
 /*得到通道频率*/
 uint8_t NRF_Get_freq(NRF24L01_STR*base){
@@ -197,7 +193,7 @@ uint8_t NRF_Get_freq(NRF24L01_STR*base){
 /*得到当前工作模式*/// enum NRF_Mode { NRF_RX,NRF_TX,NRF_STB2,NRF_STB1,NRF_POWER_DOWN };
 uint8_t NRF_Get_Mode(NRF24L01_STR*base){
 	uint8_t te = NRF_Read_Reg(base,CONFIG);
-	uint8_t cepin = base->nrf24l01cesta;
+	uint8_t cepin = base->nrf24l01cesta();
 	if(0 == (te&0x02)){
 		return NRF_POWER_DOWN;
 	}else{
@@ -267,11 +263,11 @@ void NRF24L01_TxMode(NRF24L01_STR*base,uint8_t ch)
 		temp_u8 |= 0x20;
 	}
 
-  	if (nrf_trans_power == -12)
+  	if (base->nrf_trans_power == -12)
 		temp_u8 |= 0x02;
-	else if (nrf_trans_power == -6)
+	else if (base->nrf_trans_power == -6)
 		temp_u8 |= 0x04;
-	else if (nrf_trans_power == 0)
+	else if (base->nrf_trans_power == 0)
 		temp_u8 |= 0x06;
 
   	NRF_Write_Reg(base,RF_SETUP,temp_u8);    	
@@ -321,13 +317,13 @@ void NRF24L01_RxMode(NRF24L01_STR*base,uint8_t ch)
 	else{
 		temp_u8 |= 0x20;
 	}
-  	if base->nrf_trans_power == -12{
+  	if (base->nrf_trans_power == -12){
 		temp_u8 |= 0x02;
   	}
-	else if base->nrf_trans_power == -6{
+	else if (base->nrf_trans_power == -6){
 		temp_u8 |= 0x04;
 	}
-	else if base->nrf_trans_power == 0{
+	else if (base->nrf_trans_power == 0){
 		temp_u8 |= 0x06;
 	}
 	NRF_Write_Reg(base,RF_SETUP,temp_u8);    // 数据传输率1Mbps，发射功率0dBm，低噪声放大器增益	
@@ -344,3 +340,6 @@ void NRF24L01_RxMode(NRF24L01_STR*base,uint8_t ch)
 	base->nrf24l01delayms(1);
 	base->nrf24l01ce_h();	
 }
+#ifdef __cplusplus
+}
+#endif
