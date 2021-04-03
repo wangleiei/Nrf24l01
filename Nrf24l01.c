@@ -4,14 +4,13 @@ extern "C" {
 
 #endif
 #include "Nrf24l01.h"
-static NRF24L01_Mode NRF_Get_Mode(NRF24L01_STR*dev);
 static uint8_t NRF_Get_freq(NRF24L01_STR*dev);
 static uint8_t NRF_Write_Reg(NRF24L01_STR*dev, uint8_t reg, uint8_t value);
 static uint8_t NRF_Read_Reg(NRF24L01_STR*dev, uint8_t reg);
 static uint8_t NRF_Write_Buf(NRF24L01_STR*dev, uint8_t reg, uint8_t *pBuf, uint8_t uchars);
 static uint8_t NRF_Read_Buf(NRF24L01_STR*dev, uint8_t reg, uint8_t *pBuf, uint8_t uchars);
 static void Clear_RX_FIFO(NRF24L01_STR*dev);
-
+static void sta_(NRF24L01_STR*dev,uint8_t sta);
 
 //***************************************NRF24L01寄存器指令*******************************************************
 #define NRF_READ_REG    0x00  // 读寄存器指令
@@ -30,7 +29,7 @@ static void Clear_RX_FIFO(NRF24L01_STR*dev);
 #define SETUP_RETR      0x04  // 自动重发功能设置
 #define RF_CH           0x05  // 工作频率设置
 #define RF_SETUP        0x06  // 发射速率、功耗功能设置
-#define NRFRegSTATUS    0x07  // 状态寄存器
+#define STATUS          0x07  // 状态寄存器
 #define OBSERVE_TX      0x08  // 发送监测功能
 #define RPD             0x09  // 
 #define RX_ADDR_P0      0x0A  // 频道0接收数据地址
@@ -48,200 +47,226 @@ static void Clear_RX_FIFO(NRF24L01_STR*dev);
 #define RX_PW_P5        0x16  // 接收频道5接收数据长度
 #define FIFO_STATUS     0x17  // FIFO栈入栈出状态寄存器设置
 
-
-void NRF24L01_TxMode(NRF24L01_STR*dev)
-{
-	uint8_t temp_u8;
-	dev->nrf_ch = 0xff;
-	Clear_RX_FIFO(dev);
-
-	dev->nrf24l01ce_l();	
-
-	NRF_Write_Buf(dev,TX_ADDR,dev->nrf_addr,5);      // 写寄存器指令+接收地址使能指令+接收地址+地址宽度
-	NRF_Write_Buf(dev,RX_ADDR_P0,dev->nrf_addr,5);// 为了应答接收设备，接收通道0地址和发送地址相同	
-	NRF_Write_Reg(dev,EN_AA,0);       //全部是普通模式，发送出去，就不管了 方便	
-
-	// temp_u8 = NRF_Read_Reg(dev,EN_AA);
-	NRF_Write_Reg(dev,EN_RXADDR,0x01);   // 使能接收通道0
-
-	NRF_Write_Reg(dev,SETUP_RETR,0x0);	 //全部是普通模式，发送出去，就不管了 方便	
-
-	NRF_Write_Reg(dev,RF_CH,2);         // 选择射频通道 固定通道2
-
-	NRF_Write_Reg(dev,RX_PW_P0,dev->trx_pload_width);							 // 接收通道0选择和发送通道相同有效数据宽度
-
-	temp_u8 = 0;
-	if (dev->nrf_air_rate == 2)
-	{
-		temp_u8 |= 0x08;
-	}else if(((dev->nrf_air_rate == 1))||((dev->nrf_air_rate == 250)))
-	{
-		temp_u8 |= 0x20;
-	}
-
-  	if (dev->nrf_trans_power == -12)
-		temp_u8 |= 0x02;
-	else if (dev->nrf_trans_power == -6)
-		temp_u8 |= 0x04;
-	else if (dev->nrf_trans_power == 0)
-		temp_u8 |= 0x06;
-
-  	NRF_Write_Reg(dev,RF_SETUP,temp_u8);    	
-	NRF_Write_Reg(dev,CONFIG,0x7E);      // CRC使能，16位CRC校验，上电
-	if (dev->enable_int == 1)
-	{
-		NRF_Write_Reg(dev,CONFIG,0x42);
-	}else
-	{
-		NRF_Write_Reg(dev,CONFIG,0x72);
-	}
-	
-	dev->nrf24l01csn_l();                                   
-	dev->nrf24l01spirw(FLUSH_TX);// 用于清空FIFO，不然会出现意想不到的后果！ 
-	dev->nrf24l01csn_h();
-	// dev->nrf24l01delayms(1);//!!!!
-	dev->nrf24l01ce_h();	 	
-	// dev->nrf24l01delayms(700);//!!!
-	dev->nrf_ch = NRF_Get_freq(dev);
-
-	dev->Nrf24l01Mode = NRF24_TX;
-}
-
-void NRF24L01_RxMode(NRF24L01_STR*dev)
-{
-	uint8_t temp_u8;
-	dev->nrf_ch = 0xff;
-	dev->nrf24l01ce_l();	
-	//dev->nrf24l01delayms(1);
-	NRF_Write_Buf(dev,RX_ADDR_P0,dev->nrf_addr,5);// 为了应答接收设备，接收通道0地址和发送地址相同	
-	NRF_Write_Reg(dev,EN_AA,0);       //全部是普通模式，发送出去，就不管了 方便	
-
-	NRF_Write_Reg(dev,EN_RXADDR,0x01);   // 使能接收通道0 
-
-	NRF_Write_Reg(dev,RF_CH,2);         // 选择射频通道 固定通道2
-
-	NRF_Write_Reg(dev,RX_PW_P0,dev->trx_pload_width);// 接收通道0选择和发送通道相同有效数据宽度
-
-	temp_u8 = 0;
-  	if(dev->nrf_air_rate == 2){
-		temp_u8 |= 0x08;
-  	}
-	else{
-		temp_u8 |= 0x20;
-	}
-  	if (dev->nrf_trans_power == -12){
-		temp_u8 |= 0x02;
-  	}
-	else if (dev->nrf_trans_power == -6){
-		temp_u8 |= 0x04;
-	}
-	else if (dev->nrf_trans_power == 0){
-		temp_u8 |= 0x06;
-	}
-	NRF_Write_Reg(dev,RF_SETUP,temp_u8);    // 数据传输率1Mbps，发射功率0dBm，低噪声放大器增益	
-	NRF_Write_Reg(dev,CONFIG,0x77);      //，上电 	
-	if(dev->enable_int == 1){
-		NRF_Write_Reg(dev,CONFIG,0x33);
-	}else{
-		NRF_Write_Reg(dev,CONFIG,0x73);
-	}
-	dev->nrf24l01csn_l();                                   
-	dev->nrf24l01spirw(FLUSH_RX);// 用于清空FIFO ！！关键！！不然会出现意想不到的后果！！！大家记住！！ 
-	dev->nrf24l01csn_h();		                               
-	
-	//dev->nrf24l01delayms(1);
-	dev->nrf24l01ce_h();	
-	dev->nrf_ch = NRF_Get_freq(dev);
-
-	dev->Nrf24l01Mode = NRF24_RX;
-}
-
+#define TRX_PLOAD_WIDTH 8
 void NrfInit(NRF24L01_STR*dev,
 	uint8_t (*nrf24l01spirw)(uint8_t data),
 	void (*nrf24l01csn_h)(void),
 	void (*nrf24l01csn_l)(void),
-	void (*nrf24l01ce_h)(void),
-	void (*nrf24l01ce_l)(void),
+	void (*nrf24l01ce_mode_h)(void),
+	void (*nrf24l01ce_mode_l)(void),
+	void (*delay1ms)(void),
 	uint8_t addr,
 	uint8_t enable_int
 	){
+
 	dev->nrf_addr[0] = 0x23;
 	dev->nrf_addr[1] = 0x45;
-	dev->nrf_addr[2] = 0x11;
-	dev->nrf_addr[3] = 0xae;
-	dev->nrf_addr[4] = addr;
-	dev->nrf_air_rate = 2;
-	dev->nrf_trans_power = 0;
-	dev->trx_pload_width = 8;
+	// dev->nrf_addr[2] = 0x11;
+	// dev->nrf_addr[3] = 0xae;
+	dev->nrf_addr[2] = addr;
+	// dev->nrf_air_rate = 2;
+	// dev->nrf_trans_power = 0;
+	// TRX_PLOAD_WIDTH = 8;
 	dev->enable_int = enable_int;
-	dev->nrf_ch = 2;
+	dev->nrf_ch = 0;
 
 	dev->nrf24l01spirw = nrf24l01spirw;
 	dev->nrf24l01csn_h = nrf24l01csn_h;
 	dev->nrf24l01csn_l = nrf24l01csn_l;
-	dev->nrf24l01ce_h = nrf24l01ce_h;
-	dev->nrf24l01ce_l = nrf24l01ce_l;
+	dev->nrf24l01ce_mode_h = nrf24l01ce_mode_h;
+	dev->nrf24l01ce_mode_l = nrf24l01ce_mode_l;
+	dev->delay1ms = delay1ms;
 
-	dev->Nrf24l01Mode = NRF24_IDLE;
+	// 待机模式，掉电模式都可以设置配置寄存器
+	dev->nrf24l01ce_mode_l();
+
+	// 功率设置 2Mbps 0dBm
+	NRF_Write_Reg(dev,RF_SETUP,0x0f);
+
+	NRF_Write_Reg(dev,RF_CH,2);// 选择射频通道 固定通道2
+	dev->nrf_ch = 0;//
+	NRF_Write_Reg(dev,SETUP_AW,0x01);//3字节地址宽度
+
+	NRF_Write_Buf(dev,TX_ADDR,dev->nrf_addr,3);//发送地址
+
+	NRF_Write_Buf(dev,RX_ADDR_P1,dev->nrf_addr,3);//接受地址
+	NRF_Write_Buf(dev,RX_ADDR_P0,dev->nrf_addr,3);//ack地址
+	// 通道会在后面开启
+	NRF_Write_Reg(dev,RX_PW_P0,0);//不使用通道
+	NRF_Write_Reg(dev,RX_PW_P1,0);//不使用通道
+	NRF_Write_Reg(dev,RX_PW_P2,0);//不使用通道
+	NRF_Write_Reg(dev,RX_PW_P3,0);//不使用通道
+	NRF_Write_Reg(dev,RX_PW_P4,0);//不使用通道
+
+	// 自动重发，750us，15次，
+	// 在1mbps，2mbps下500us有足够时间接受ACK携带的数据，目前不支持ack携带数据
+	NRF_Write_Reg(dev,SETUP_RETR,0x2F);
+
+	// 清理状态
+	NRF_Write_Reg(dev,STATUS,0xf0);	
+	NRF_Write_Reg(dev,STATUS,0x00);	
+	NRF_Write_Reg(dev,EN_RXADDR,0x00);//不允许接受数据通道，
+	// 待机模式1,无数据传输
+	NRF_Write_Reg(dev,CONFIG,0x02);
+
+	dev->nrf_ch = NRF_Read_Reg(dev,RF_CH);
+	if(2 != dev->nrf_ch){
+		dev->Nrf24l01Mode = NRF24_ERROR;
+		return;
+	}
+	// dev->nrf24l01ce_mode_l();
+
+	// dev->plos_cnt = 0;
+	dev->auto_retry_trans_cnt = 0;
+	dev->packet_trans_ber = 0.0;
+	dev->Nrf24l01Mode = NRF24_STB1;
+}
+void NRF24L01_TxMode(NRF24L01_STR*dev){
+	if(NRF24_ERROR == dev->Nrf24l01Mode){return ;}
+
+	/*注意这里4个寄存器配置是特别设置，不用通道1，只用0*/
+	NRF_Write_Reg(dev,RX_PW_P1,0);//不使用通道1
+	// 发送完会自动进入接受ack模式，需要EN_AA的数据通道0设置1
+	//只允许接受数据通道0启用,为了接受ACK
+	NRF_Write_Reg(dev,EN_RXADDR,0x01);
+	NRF_Write_Reg(dev,EN_AA,0x01);
+	NRF_Write_Reg(dev,RX_PW_P0,TRX_PLOAD_WIDTH);
+
+	dev->nrf24l01ce_mode_l();
+	dev->Nrf24l01Mode = NRF24_STB1;
+	// 不中断，8位CRC，上电，发送置位，待机模式1，发送函数会进入发送模式
+	NRF_Write_Reg(dev,CONFIG,0x7A);
+
+	dev->Nrf24l01Mode = NRF24_TX;
+}
+void NRF24L01_RxMode(NRF24L01_STR*dev){
+	if(NRF24_ERROR == dev->Nrf24l01Mode){return ;}
+	// 待机模式，掉电模式都可以设置配置寄存器
+	dev->nrf24l01ce_mode_l();
+	dev->Nrf24l01Mode = NRF24_STB1;
+	// 不中断，8位CRC，上电，接受模式
+	NRF_Write_Reg(dev,CONFIG,0x7B);
+
+	NRF_Write_Reg(dev,EN_RXADDR,0x02);//只允许接受数据通道1启用	
+	NRF_Write_Reg(dev,EN_AA,0x02);//启动自动ack回应
+	NRF_Write_Reg(dev,RX_PW_P1,TRX_PLOAD_WIDTH);//设置通道接受数据长度
+	NRF_Write_Reg(dev,RX_PW_P0,0);//不使用通道0
+
+	dev->nrf24l01ce_mode_h();
+	dev->delay1ms();//130us后nrf进入检测无线
+	dev->Nrf24l01Mode = NRF24_RX;
 }
 
-// -2:发送超时，无法发送
-// -1：处于掉电模式，需要初始化
-// 0：长度超过发送长度
-// >0:实际发送长度
-int8_t NRF_TxPacket(NRF24L01_STR*dev, uint8_t *tx_buf,uint8_t len)
-{	
-	uint8_t Saft_Count_u8 = 0;
-	if(NRF_Get_Mode(dev) == NRF24_POWER_DOWN){
-		return -1;//掉电模式了
+// 1:发送成功
+// -1:发送失败，不是发送模式
+// -2:发送失败，超过最多发送上限
+// -3:发送失败,MCU和NRF无法通信
+int8_t NRF_TxPacket(NRF24L01_STR*dev, uint8_t *tx_buf,uint8_t len){
+
+	uint8_t sta = 0;
+	uint8_t count = 0;
+	uint8_t obs = 0;
+
+	if(dev->Nrf24l01Mode != NRF24_TX){
+		return -1;
 	}
-	if (len > dev->trx_pload_width)
-	{
-		return 0;
+	if(NRF24_ERROR == dev->Nrf24l01Mode){return - 3;}
+	dev->nrf24l01ce_mode_l();
+	dev->Nrf24l01Mode = NRF24_STB1;	
+	NRF_Write_Buf(dev,WR_TX_PLOAD, tx_buf, TRX_PLOAD_WIDTH); // 装载数据
+	dev->nrf24l01ce_mode_h();// 置高CE，激发数据发送，
+	dev->delay1ms();
+	dev->nrf24l01ce_mode_l();
+	dev->Nrf24l01Mode = NRF24_TX;	
+
+	// 自动进入接受模式，需要判断ack，最多发送次数,12ms之后达到最多发送次数
+	while(count < 14){
+		sta = NRF_Read_Reg(dev,STATUS);
+		sta_(dev,sta);
+		
+		obs = NRF_Read_Reg(dev,OBSERVE_TX);
+
+		// dev->plos_cnt = (obs&0xf0)>>4;
+		dev->auto_retry_trans_cnt = 0x0f&obs;
+		dev->packet_trans_ber = dev->auto_retry_trans_cnt/15.0;
+
+		if(sta & 0x20){//接受到ACK
+			// 会自动清除TX fifo
+			NRF_Write_Reg(dev,STATUS,0x20);
+			return 1;
+		}else if(0x10 & sta){//发送失败
+			// 需要清理MX_RT中断源
+			NRF_Write_Reg(dev,STATUS,0x10);
+
+			dev->nrf24l01ce_mode_l();                                    
+			dev->nrf24l01csn_l();                                   
+			dev->nrf24l01spirw(FLUSH_TX);
+			dev->nrf24l01csn_h();		                               
+			dev->nrf24l01ce_mode_h();				
+			return -2;
+		}
+		dev->delay1ms();
+		count++;
 	}
-	NRF_Write_Reg(dev,NRFRegSTATUS,0x70);
-	dev->nrf24l01ce_l();	
-	NRF_Write_Buf(dev,WR_TX_PLOAD, tx_buf, len); // 装载数据
-	dev->nrf24l01ce_h();// 置高CE，激发数据发送
-	while((0 == (NRF_Read_Reg(dev,NRFRegSTATUS)&0x20))&&(Saft_Count_u8++<100)){//0是没有发送完
-	}
-	if(Saft_Count_u8 < 100){
-		//清位
-		NRF_Write_Reg(dev,NRFRegSTATUS,0x20);
-	}else{ 
-		NRF_Write_Reg(dev,NRFRegSTATUS,0x70);
+	if(count == 14){
 		return -2;
 	}
-	dev->nrf24l01ce_l();                                    
-	dev->nrf24l01csn_l();                                   
-	dev->nrf24l01spirw(FLUSH_TX);// 清空FIFO，关键。不然会出现意想不到的后果！
-	dev->nrf24l01csn_h();		                               
-	dev->nrf24l01ce_h();	 
-	return dev->trx_pload_width;
 }
-// -2:接受长度超过能提供的长度
-// -1:无法接受数据，处于掉电模式
 // 0：没有收到数据
 // >0：数据长度
+// -3:发送失败,MCU和NRF无法通信
 int8_t NRF_Receive_Data(NRF24L01_STR*dev, uint8_t *ptr,uint8_t len){
-	uint8_t i_u8 = 0;
-	if(NRF_Get_Mode(dev) == NRF24_POWER_DOWN){
-		return -1;//掉电模式了
-	}
-	if(len > dev->trx_pload_width){
-		return -2;
-	}
-	if(0 == (0x40&NRF_Read_Reg(dev,NRFRegSTATUS))){
+	static uint8_t recch = 0;
+	uint8_t temp = 0;
+	uint8_t sta = 0;
+	if(dev->Nrf24l01Mode != NRF24_RX){
 		return 0;
-	}else{
+	}
+	if(NRF24_ERROR == dev->Nrf24l01Mode){return - 3;}
 
-		NRF_Read_Buf(dev,RD_RX_PLOAD,ptr,dev->trx_pload_width);
-		NRF_Write_Reg(dev,NRFRegSTATUS,0x70);//clear bit
+	sta = NRF_Read_Reg(dev,STATUS);
+	sta_(dev,sta);
+	if(sta & 0x40){
+		temp = (sta & 0x0e)>>1;
+		if(0x07 == temp){
+			dev->rx_fifo = RX_FIFO_EMPTY;
+		}else if(0x06 == temp){
+			dev->rx_fifo = RX_FIFO_NOT_USED;
+		}else{
+			dev->rx_fifo = temp;
+		}
+
+		dev->nrf24l01ce_mode_l();//进入待机1,只有待机模式下可以配置config
+		dev->Nrf24l01Mode = NRF24_STB1;
+		// 按照手册例，进入待机模式之后，读取数据，虽然手册也写了任何模式都可读取
+		NRF_Read_Buf(dev,RD_RX_PLOAD,ptr,TRX_PLOAD_WIDTH);
 		dev->nrf24l01csn_l();                                   
-		dev->nrf24l01spirw(FLUSH_RX);// 清空FIFO，关键。不然会一直认为有接受，数据还是错误的
-		dev->nrf24l01csn_h();		                               
+		dev->nrf24l01spirw(FLUSH_RX);
+		dev->nrf24l01csn_h();		
 
-		return dev->trx_pload_width;
+		NRF_Write_Reg(dev,STATUS,0x40);//清理状态
+		// 重新进入 不中断，8位CRC，上电，接受模式
+		NRF_Write_Reg(dev,CONFIG,0x7B);
+		dev->nrf24l01ce_mode_h();
+		dev->Nrf24l01Mode = NRF24_RX;
+		return TRX_PLOAD_WIDTH;
+	}
+	return 0;
+}
+static void sta_(NRF24L01_STR*dev,uint8_t sta){
+	uint8_t temp = 0;
+	temp = (sta & 0x0e)>>1;
+	if(0x07 == temp){
+		dev->rx_fifo = RX_FIFO_EMPTY;
+	}else if(0x06 == temp){
+		dev->rx_fifo = RX_FIFO_NOT_USED;
+	}else{
+		dev->rx_fifo = temp;
+	}
+	if(sta & 0x01){
+		dev->tx_fifo = TX_FIFO_FULL;
+	}else{
+		dev->tx_fifo = TX_FIFO_NO_FULL;
 	}
 }
 static uint8_t NRF_Write_Reg(NRF24L01_STR*dev, uint8_t reg, uint8_t value){
@@ -292,28 +317,14 @@ static uint8_t NRF_Read_Buf(NRF24L01_STR*dev, uint8_t reg, uint8_t *pBuf, uint8_
 static uint8_t NRF_Get_freq(NRF24L01_STR*dev){
 	return NRF_Read_Reg(dev,RF_CH);
 }
-/*得到当前工作模式*///
-static NRF24L01_Mode NRF_Get_Mode(NRF24L01_STR*dev){
-	uint8_t te = NRF_Read_Reg(dev,CONFIG);
-	// uint8_t cepin = dev->nrf24l01cesta();
-	if(0 == (te&0x02)){
-		return NRF24_POWER_DOWN;
-	}else{
-		if(te&0x01){
-			return NRF24_RX;
-		}else{
-			return NRF24_STB2;
-		}
-	}
-}
-static void Clear_RX_FIFO(NRF24L01_STR*dev)    
-{
-	dev->nrf24l01ce_l();                                    
-	dev->nrf24l01csn_l();                                   
-	dev->nrf24l01spirw(FLUSH_RX);                                  // 清空FIFO，关键。不然会出现意想不到的后果！
-	dev->nrf24l01csn_h();		                               
-	dev->nrf24l01ce_h();
-}
+// static void Clear_RX_FIFO(NRF24L01_STR*dev)    
+// {
+// 	dev->nrf24l01ce_mode_l();                                    
+// 	dev->nrf24l01csn_l();                                   
+// 	dev->nrf24l01spirw(FLUSH_RX);                                  // 清空FIFO，关键。不然会出现意想不到的后果！
+// 	dev->nrf24l01csn_h();		                               
+// 	dev->nrf24l01ce_mode_h();
+// }
 
 #ifdef __cplusplus
 }
